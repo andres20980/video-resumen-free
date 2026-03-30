@@ -317,8 +317,9 @@ def process_video(video_url, api_key, results_dir="docs/data"):
     is_local = os.path.isfile(video_url)
     source_path = Path(video_url) if is_local else None
 
-    results_dir = Path(results_dir)
-    results_dir.mkdir(parents=True, exist_ok=True)
+    if not is_local:
+        results_dir = Path(results_dir)
+        results_dir.mkdir(parents=True, exist_ok=True)
 
     title = get_video_title(video_url)
     log(f"Title: {title or '(unknown)'}")
