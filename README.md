@@ -1,12 +1,22 @@
 # resumen-video
 
-Convierte cualquier vídeo en un resumen `.md` detallado con IA. **Gratis. Un solo comando.**
+## El problema
+
+Las herramientas que resumen vídeos a partir de la transcripción **se quedan a medias**. Solo leen lo que se dice, no lo que se ve. Y en muchos vídeos lo importante está en pantalla: demos de software, tests de usabilidad, presentaciones con datos, tutoriales con código...
+
+Un resumen basado solo en audio de un test de usabilidad te dice "el usuario comenta que le cuesta encontrar el botón". Pero no te dice **qué pantalla** estaba viendo, **qué diseño** fallaba, ni **qué texto** aparecía en la interfaz. La transcripción sola es sumamente pobre.
+
+**resumen-video** cruza la transcripción del audio **con el análisis visual de los frames**, y genera un resumen que incluye ambas fuentes. Sabe lo que se dijo **y** lo que se vio en pantalla.
+
+---
+
+## La solución: un solo comando
 
 ```
 resumen-video reunion.mp4
 ```
 
-Resultado: `reunion.md` aparece donde estaba el vídeo. El `.mp4` se borra automáticamente.
+Resultado: `reunion.md` aparece donde estaba el vídeo. El `.mp4` se borra automáticamente. **Gratis.**
 
 ---
 
