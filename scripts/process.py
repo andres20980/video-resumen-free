@@ -57,7 +57,9 @@ def download_video(url, output_dir):
 
 
 def get_video_title(url):
-    """Get video title via yt-dlp (best effort)."""
+    """Get video title via yt-dlp or filename for local files."""
+    if os.path.isfile(url):
+        return Path(url).stem
     try:
         result = subprocess.run(
             ["yt-dlp", "--get-title", "--no-playlist", url],
@@ -352,6 +354,15 @@ def process_video(video_url, api_key, results_dir="docs/data"):
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 def main():
+    # Load .env if present (for local use)
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
     # Get config from env (GitHub Actions) or CLI args (local)
     video_url = os.environ.get("VIDEO_URL", "")
     issue_body = os.environ.get("ISSUE_BODY", "")
@@ -416,6 +427,17 @@ def main():
     print(f"   Transcript: docs/data/{result_id}_transcript.txt")
     print(f"   Cost: $0.00")
     print(f"{'='*60}")
+
+    # Auto-serve frontend if --serve flag
+    if "--serve" in sys.argv:
+        import http.server
+        import functools
+        docs_dir = Path(__file__).resolve().parent.parent / "docs"
+        port = 8080
+        print(f"\n🌐 Serving frontend at http://localhost:{port}")
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(docs_dir))
+        with http.server.HTTPServer(("", port), handler) as httpd:
+            httpd.serve_forever()
 
 
 if __name__ == "__main__":
