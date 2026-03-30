@@ -140,7 +140,7 @@ def gemini_call(client, **kwargs):
         try:
             return client.models.generate_content(**kwargs)
         except (ServerError, ClientError) as e:
-            code = getattr(e, "status_code", 0) or 0
+            code = getattr(e, "code", 0) or 0
             if code in (429, 503) and attempt < MAX_RETRIES:
                 wait = RETRY_BASE_DELAY * attempt
                 log(f"⏳ Gemini {code} — retrying in {wait}s (attempt {attempt}/{MAX_RETRIES})")
