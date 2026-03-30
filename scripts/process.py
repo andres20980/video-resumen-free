@@ -124,8 +124,29 @@ def extract_frames(video_path, output_dir, max_frames=20):
 
 # ─── Gemini AI ────────────────────────────────────────────────────────────────
 
+MAX_RETRIES = 5
+RETRY_BASE_DELAY = 10  # seconds
+
+
 def get_client(api_key):
     return genai.Client(api_key=api_key)
+
+
+def gemini_call(client, **kwargs):
+    """Call Gemini with retry on 429/503 (rate limit / overloaded)."""
+    from google.genai.errors import ServerError, ClientError
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return client.models.generate_content(**kwargs)
+        except (ServerError, ClientError) as e:
+            code = getattr(e, "status_code", 0) or 0
+            if code in (429, 503) and attempt < MAX_RETRIES:
+                wait = RETRY_BASE_DELAY * attempt
+                log(f"⏳ Gemini {code} — retrying in {wait}s (attempt {attempt}/{MAX_RETRIES})")
+                time.sleep(wait)
+            else:
+                raise
 
 
 def transcribe_audio(audio_path, api_key):
@@ -159,7 +180,8 @@ def transcribe_audio(audio_path, api_key):
         "responde EXACTAMENTE: [SIN HABLA: descripción breve del audio]\n"
         "- NUNCA inventes palabras que no se escuchen\n"
     )
-    response = client.models.generate_content(
+    response = gemini_call(
+        client,
         model=GEMINI_MODEL,
         contents=[
             prompt,
@@ -206,7 +228,8 @@ def analyze_frames(frame_paths, api_key):
         parts.append(types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg"))
 
     log(f"Analyzing {len(frame_paths)} frames with Gemini vision...")
-    response = client.models.generate_content(
+    response = gemini_call(
+        client,
         model=GEMINI_MODEL,
         contents=parts,
         config=types.GenerateContentConfig(
@@ -293,7 +316,8 @@ ANÁLISIS VISUAL:
 {visual_analysis}"""
 
     log("Generating summary with Gemini...")
-    response = client.models.generate_content(
+    response = gemini_call(
+        client,
         model=GEMINI_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
