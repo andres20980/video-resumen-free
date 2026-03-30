@@ -105,7 +105,13 @@ def extract_frames(video_path, output_dir, max_frames=20):
     os.makedirs(frames_dir, exist_ok=True)
 
     duration = get_duration(video_path)
-    interval = max(30, duration / max_frames)
+    # Short videos: at least 1 frame/sec, cap at max_frames
+    # Long videos: 1 frame every 30s minimum
+    if duration <= 60:
+        n_frames = min(max_frames, max(1, int(duration)))
+        interval = duration / n_frames
+    else:
+        interval = max(30, duration / max_frames)
 
     cmd = [
         "ffmpeg", "-i", video_path,
@@ -151,6 +157,9 @@ def transcribe_audio(audio_path, api_key):
         "- Incluye muletillas, repeticiones y pausas naturales\n"
         "- NO resumas, NO omitas, NO parafrasees\n"
         "- Formato: texto corrido sin timestamps\n"
+        "- Si el audio NO contiene habla humana (solo música, ruido, silencio), "
+        "responde EXACTAMENTE: [SIN HABLA: descripción breve del audio]\n"
+        "- NUNCA inventes palabras que no se escuchen\n"
     )
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -177,13 +186,18 @@ def analyze_frames(frame_paths, api_key):
     """Analyze frames using Gemini vision (free)."""
     client = get_client(api_key)
 
+    if not frame_paths:
+        return "[SIN FRAMES: no se extrajeron imágenes del video]"
+
     prompt = (
         "Analiza estas imágenes extraídas de un video. Para cada imagen relevante:\n"
-        "1. Describe qué se ve (personas, presentaciones, documentos, pantallas compartidas)\n"
+        "1. Describe EXACTAMENTE qué se ve (objetos, personas, entorno, pantallas)\n"
         "2. Transcribe TODO el texto visible en pantalla literalmente\n"
         "3. Identifica logos, diagramas, datos numéricos, gráficos\n"
         "4. Agrupa imágenes similares para evitar repetición\n\n"
-        "Sé exhaustivo con el texto en pantalla — transcribe literalmente todo lo legible."
+        "REGLA CRÍTICA: Describe SOLO lo que realmente aparece en las imágenes. "
+        "NUNCA inventes contenido, texto, personas o elementos que no estén visibles. "
+        "Si una imagen muestra un objeto simple (ej: un aparato), descríbelo tal cual."
     )
     parts = [prompt]
 
@@ -209,6 +223,26 @@ def generate_summary(transcript, visual_analysis, duration_min, api_key):
     """Generate comprehensive summary using Gemini (free)."""
     client = get_client(api_key)
 
+    # Detect low-content scenarios
+    no_speech = "[SIN HABLA" in transcript
+    no_frames = "[SIN FRAMES" in visual_analysis
+    low_content = no_speech or no_frames or len(transcript.strip()) < 50
+
+    hallucination_guard = ""
+    if low_content:
+        hallucination_guard = (
+            "\n\nALERTA DE CONTENIDO ESCASO:\n"
+            "La transcripción y/o el análisis visual indican que este video tiene "
+            "poco contenido verbal o visual significativo. "
+            "En este caso DEBES:\n"
+            "- Describir SOLO lo que realmente se ve y se oye\n"
+            "- Si no hay habla, decir explícitamente que no hay habla\n"
+            "- NO inventar presentaciones, diapositivas, webinars ni contenido ficticio\n"
+            "- NO fabricar nombres de empresas, personas ni datos\n"
+            "- Generar un resumen breve y honesto acorde al contenido real\n"
+            "- Es preferible un resumen de 3 líneas honestas que uno de 100 líneas inventadas\n"
+        )
+
     prompt = f"""Eres un experto en generar resúmenes exhaustivos de videos.
 A partir de la transcripción y el análisis visual de un video de {duration_min:.1f} minutos,
 genera un resumen COMPLETO y DETALLADO en español.
@@ -217,9 +251,12 @@ INSTRUCCIONES CRÍTICAS:
 - Identifica a TODOS los participantes por nombre cuando se mencionen
 - Extrae TODOS los datos numéricos, fechas, plazos y cifras
 - Describe las decisiones tomadas y los próximos pasos acordados
-- NO inventes información que no esté en la transcripción
+- JAMÁS inventes información que no esté en la transcripción o el análisis visual
+- JAMÁS fabriques nombres de empresas, personas, eventos o datos que no aparezcan
+- Si el contenido es escaso (video corto, sin habla, etc), haz un resumen breve y honesto
 - Los timestamps deben ser coherentes con la duración real ({duration_min:.1f} min)
 - Corrige nombres propios si puedes inferir la grafía correcta del contexto
+{hallucination_guard}
 
 FORMATO OBLIGATORIO:
 
