@@ -1,0 +1,16 @@
+{
+  "id": "20260330_113731",
+  "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)",
+  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "duration_minutes": 3.6,
+  "transcript_chars": 2136,
+  "summary_chars": 7617,
+  "frames_analyzed": 7,
+  "timestamp": "2026-03-30T11:37:31.461407+00:00",
+  "cost_usd": 0.0,
+  "models": {
+    "transcription": "gemini/gemini-2.5-flash",
+    "vision": "gemini/gemini-2.5-flash",
+    "summary": "gemini/gemini-2.5-flash"
+  }
+}

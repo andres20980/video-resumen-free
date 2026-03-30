@@ -1,0 +1,84 @@
+name: "\U0001F4F9 Resumir Video"
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'URL del video (YouTube, Vimeo, Google Drive, URL directa)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'resumir'))
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('scripts/requirements.txt') }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install -r scripts/requirements.txt
+
+      - name: Install yt-dlp
+        run: pip install yt-dlp
+
+      - name: Extract URL from issue
+        if: github.event_name == 'issues'
+        id: extract
+        run: |
+          BODY='${{ github.event.issue.body }}'
+          URL=$(echo "$BODY" | grep -oP 'https?://[^\s\)\"'"'"']+' | head -1)
+          echo "video_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Process video
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VIDEO_URL: ${{ github.event.inputs.video_url || steps.extract.outputs.video_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || '' }}
+          ISSUE_BODY: ${{ github.event.issue.body || '' }}
+        run: python scripts/process.py
+
+      - name: Comment on issue
+        if: github.event_name == 'issues' && hashFiles('comment.md') != ''
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body-path: comment.md
+
+      - name: Close issue
+        if: github.event_name == 'issues'
+        uses: peter-evans/close-issue@v3
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          comment: "✅ Resumen generado. Ver comentario arriba o visitar GitHub Pages."
+
+      - name: Commit results
+        run: |
+          git config user.name "Video Resumen Bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "📹 New summary: $(date -u +%Y-%m-%d)"
+          git push

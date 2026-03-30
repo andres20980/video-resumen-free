@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Resumen Free — Resúmenes de video con IA, 100% gratis</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>📹 Video Resumen <span class="free-badge">FREE</span></h1>
+            <p class="tagline">Resúmenes exhaustivos de video con IA — 100% gratuito</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Hero / How it works -->
+        <section class="hero" id="hero">
+            <div class="how-it-works">
+                <h2>¿Cómo funciona?</h2>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-num">1</div>
+                        <div class="step-text">
+                            <strong>Pega la URL</strong>
+                            <p>YouTube, Vimeo, Google Drive o cualquier enlace directo</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">2</div>
+                        <div class="step-text">
+                            <strong>GitHub Actions procesa</strong>
+                            <p>Descarga, transcribe, analiza frames y genera resumen</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">3</div>
+                        <div class="step-text">
+                            <strong>Resultado aquí</strong>
+                            <p>Resumen completo con timestamps, participantes y conclusiones</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="cta-row">
+                    <a id="new-summary-btn" class="btn btn-primary" target="_blank">
+                        ➕ Nuevo Resumen
+                    </a>
+                    <a id="actions-link" class="btn btn-secondary" target="_blank">
+                        ⚙️ Ver Pipeline
+                    </a>
+                </div>
+            </div>
+
+            <div class="tech-stack">
+                <h3>Stack gratuito</h3>
+                <div class="tech-items">
+                    <span class="tech-item">🤖 Gemini 2.5 Flash <em>(free tier)</em></span>
+                    <span class="tech-item">📥 yt-dlp <em>(open source)</em></span>
+                    <span class="tech-item">🎬 ffmpeg <em>(open source)</em></span>
+                    <span class="tech-item">⚡ GitHub Actions <em>(2000 min/mes)</em></span>
+                    <span class="tech-item">🌐 GitHub Pages <em>(hosting gratis)</em></span>
+                </div>
+                <p class="cost-label">Coste por video: <strong class="free-text">$0.00</strong></p>
+            </div>
+        </section>
+
+        <!-- Results -->
+        <section class="results" id="results">
+            <h2>📋 Resúmenes generados</h2>
+            <div id="results-list" class="results-grid">
+                <div class="loading">Cargando resultados...</div>
+            </div>
+        </section>
+
+        <!-- Single Result View -->
+        <section class="result-detail" id="result-detail" style="display:none;">
+            <a href="#/" class="back-link">← Volver a la lista</a>
+            <div id="result-meta"></div>
+            <div id="result-content" class="markdown-body"></div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>
+                Hecho con ❤️ usando Gemini 2.5 Flash + GitHub Actions.
+                <a id="repo-link" target="_blank">Ver código fuente</a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.env
+*.mp4
+*.mp3
+*.wav
+*.opus
+*.avi
+*.mkv
+*.webm
+tmp/
+.cache/
+*.egg-info/
+dist/
+build/
+.venv/
