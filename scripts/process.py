@@ -272,7 +272,14 @@ ANÁLISIS VISUAL:
 # ─── Pipeline ─────────────────────────────────────────────────────────────────
 
 def process_video(video_url, api_key, results_dir="docs/data"):
-    """Full pipeline: download → extract → transcribe → analyze → summarize."""
+    """Full pipeline: download → extract → transcribe → analyze → summarize.
+
+    For local files: outputs {name}.md next to the original and deletes the video.
+    For URLs: outputs to docs/data/ with timestamped names.
+    """
+    is_local = os.path.isfile(video_url)
+    source_path = Path(video_url) if is_local else None
+
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -280,8 +287,8 @@ def process_video(video_url, api_key, results_dir="docs/data"):
     log(f"Title: {title or '(unknown)'}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # 1. Download
-        log("📥 Downloading video...")
+        # 1. Download / copy
+        log("📥 Loading video...")
         video_path = download_video(video_url, tmpdir)
         duration = get_duration(video_path)
         duration_min = duration / 60
@@ -297,7 +304,7 @@ def process_video(video_url, api_key, results_dir="docs/data"):
         frames = extract_frames(video_path, tmpdir)
         log(f"🖼️ Frames: {len(frames)}")
 
-        # Delete video to free disk space
+        # Delete temp copy immediately
         os.remove(video_path)
 
         # 3. Transcribe with Gemini
@@ -316,39 +323,52 @@ def process_video(video_url, api_key, results_dir="docs/data"):
         log(f"✨ Summary: {len(summary)} chars")
 
     # 6. Save results
-    result_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if is_local:
+        # Local mode: .md replaces the video file in the same directory
+        output_md = source_path.with_suffix(".md")
+        output_md.write_text(summary, encoding="utf-8")
 
-    (results_dir / f"{result_id}.md").write_text(summary, encoding="utf-8")
-    (results_dir / f"{result_id}_transcript.txt").write_text(transcript, encoding="utf-8")
+        # Delete the original video
+        if source_path.exists():
+            source_path.unlink()
+            log(f"🗑️ Deleted original: {source_path}")
 
-    meta = {
-        "id": result_id,
-        "title": title or video_url,
-        "url": video_url,
-        "duration_minutes": round(duration_min, 1),
-        "transcript_chars": len(transcript),
-        "summary_chars": len(summary),
-        "frames_analyzed": len(frames),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "cost_usd": 0.00,
-        "models": {
-            "transcription": f"gemini/{GEMINI_MODEL}",
-            "vision": f"gemini/{GEMINI_MODEL}",
-            "summary": f"gemini/{GEMINI_MODEL}",
-        },
-    }
-    (results_dir / f"{result_id}.json").write_text(
-        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+        log(f"✅ {output_md}")
+        return output_md.stem, {"title": title, "duration_minutes": round(duration_min, 1), "summary_chars": len(summary)}, summary
+    else:
+        # URL mode: save to docs/data/ for GitHub Pages
+        result_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    # Update index
-    index_path = results_dir / "index.json"
-    index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else []
-    index.insert(0, meta)
-    index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+        (results_dir / f"{result_id}.md").write_text(summary, encoding="utf-8")
+        (results_dir / f"{result_id}_transcript.txt").write_text(transcript, encoding="utf-8")
 
-    log(f"✅ Results saved: docs/data/{result_id}.*")
-    return result_id, meta, summary
+        meta = {
+            "id": result_id,
+            "title": title or video_url,
+            "url": video_url,
+            "duration_minutes": round(duration_min, 1),
+            "transcript_chars": len(transcript),
+            "summary_chars": len(summary),
+            "frames_analyzed": len(frames),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "cost_usd": 0.00,
+            "models": {
+                "transcription": f"gemini/{GEMINI_MODEL}",
+                "vision": f"gemini/{GEMINI_MODEL}",
+                "summary": f"gemini/{GEMINI_MODEL}",
+            },
+        }
+        (results_dir / f"{result_id}.json").write_text(
+            json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+        index_path = results_dir / "index.json"
+        index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else []
+        index.insert(0, meta)
+        index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        log(f"✅ Results saved: docs/data/{result_id}.*")
+        return result_id, meta, summary
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -391,53 +411,25 @@ def main():
 
     result_id, meta, summary = process_video(video_url, api_key)
 
-    # Write GitHub Actions comment file
+    is_local = os.path.isfile(video_url) if not isinstance(meta, dict) else "url" in meta
+
+    # Write GitHub Actions comment file (URL mode only)
     issue_number = os.environ.get("ISSUE_NUMBER", "")
-    if issue_number:
-        comment = f"""## 📹 Resumen generado
-
-| | |
-|---|---|
-| **Video** | [{meta['title']}]({meta['url']}) |
-| **Duración** | {meta['duration_minutes']} min |
-| **Coste** | $0.00 💚 |
-| **Modelos** | Gemini 2.5 Flash (transcripción + visión + resumen) |
-
----
-
-{summary}
-
----
-
-<details>
-<summary>📊 Detalles técnicos</summary>
-
-- Transcripción: {meta['transcript_chars']} caracteres (Gemini)
-- Análisis visual: {meta['frames_analyzed']} frames (Gemini)
-- Resumen: {meta['summary_chars']} caracteres (Gemini)
-- Resultado: docs/data/{result_id}.md
-
-</details>
-"""
+    if issue_number and isinstance(meta, dict) and "url" in meta:
+        comment = (
+            "## 📹 Resumen generado\n\n"
+            "| | |\n|---|---|\n"
+            f"| **Video** | [{meta['title']}]({meta['url']}) |\n"
+            f"| **Duración** | {meta['duration_minutes']} min |\n"
+            f"| **Coste** | $0.00 |\n\n"
+            f"---\n\n{summary}\n"
+        )
         Path("comment.md").write_text(comment, encoding="utf-8")
 
     print(f"\n{'='*60}")
-    print(f"✅ DONE — Result ID: {result_id}")
-    print(f"   Summary: docs/data/{result_id}.md")
-    print(f"   Transcript: docs/data/{result_id}_transcript.txt")
+    print(f"✅ DONE — {result_id}")
     print(f"   Cost: $0.00")
     print(f"{'='*60}")
-
-    # Auto-serve frontend if --serve flag
-    if "--serve" in sys.argv:
-        import http.server
-        import functools
-        docs_dir = Path(__file__).resolve().parent.parent / "docs"
-        port = 8080
-        print(f"\n🌐 Serving frontend at http://localhost:{port}")
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(docs_dir))
-        with http.server.HTTPServer(("", port), handler) as httpd:
-            httpd.serve_forever()
 
 
 if __name__ == "__main__":
