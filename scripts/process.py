@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Video Resumen Free — 100% free video summarization.
+"""resumen-video — 100% free video summarization.
 
 Pipeline: yt-dlp (download) → ffmpeg (extract) → Gemini 2.5 Flash (transcribe + analyze + summarize)
-Cost: $0.00 — everything runs on Gemini free tier + GitHub Actions free tier.
+Cost: $0.00 — everything runs on Gemini free tier.
 """
 
 import os
 import sys
-import json
 import subprocess
 import tempfile
-import re
 import glob
 import time
 import io
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 
 from google import genai
 from google.genai import types
@@ -308,18 +306,14 @@ ANÁLISIS VISUAL:
 
 # ─── Pipeline ─────────────────────────────────────────────────────────────────
 
-def process_video(video_url, api_key, results_dir="docs/data"):
+def process_video(video_url, api_key):
     """Full pipeline: download → extract → transcribe → analyze → summarize.
 
     For local files: outputs {name}.md next to the original and deletes the video.
-    For URLs: outputs to docs/data/ with timestamped names.
+    For URLs: outputs {title}.md in the current directory.
     """
     is_local = os.path.isfile(video_url)
     source_path = Path(video_url) if is_local else None
-
-    if not is_local:
-        results_dir = Path(results_dir)
-        results_dir.mkdir(parents=True, exist_ok=True)
 
     title = get_video_title(video_url)
     log(f"Title: {title or '(unknown)'}")
@@ -374,45 +368,19 @@ def process_video(video_url, api_key, results_dir="docs/data"):
         log(f"✅ {output_md}")
         return output_md.stem, {"title": title, "duration_minutes": round(duration_min, 1), "summary_chars": len(summary)}, summary
     else:
-        # URL mode: save to docs/data/ for GitHub Pages
-        result_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        # URL mode: save .md in current directory
+        safe_name = (title or "video").replace("/", "_").replace("\\  ", "_")[:100]
+        output_md = Path(f"{safe_name}.md")
+        output_md.write_text(summary, encoding="utf-8")
 
-        (results_dir / f"{result_id}.md").write_text(summary, encoding="utf-8")
-        (results_dir / f"{result_id}_transcript.txt").write_text(transcript, encoding="utf-8")
-
-        meta = {
-            "id": result_id,
-            "title": title or video_url,
-            "url": video_url,
-            "duration_minutes": round(duration_min, 1),
-            "transcript_chars": len(transcript),
-            "summary_chars": len(summary),
-            "frames_analyzed": len(frames),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "cost_usd": 0.00,
-            "models": {
-                "transcription": f"gemini/{GEMINI_MODEL}",
-                "vision": f"gemini/{GEMINI_MODEL}",
-                "summary": f"gemini/{GEMINI_MODEL}",
-            },
-        }
-        (results_dir / f"{result_id}.json").write_text(
-            json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-
-        index_path = results_dir / "index.json"
-        index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else []
-        index.insert(0, meta)
-        index_path.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
-
-        log(f"✅ Results saved: docs/data/{result_id}.*")
-        return result_id, meta, summary
+        log(f"✅ {output_md}")
+        return safe_name, {"title": title, "duration_minutes": round(duration_min, 1), "summary_chars": len(summary)}, summary
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 def main():
-    # Load .env if present (for local use)
+    # Load .env if present
     env_path = Path(__file__).resolve().parent.parent / ".env"
     if env_path.exists():
         for line in env_path.read_text().splitlines():
@@ -421,48 +389,24 @@ def main():
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip())
 
-    # Get config from env (GitHub Actions) or CLI args (local)
-    video_url = os.environ.get("VIDEO_URL", "")
-    issue_body = os.environ.get("ISSUE_BODY", "")
     api_key = os.environ.get("GEMINI_API_KEY", "")
 
-    # CLI override
-    if len(sys.argv) > 1:
-        video_url = sys.argv[1]
+    # CLI args
+    video_url = sys.argv[1] if len(sys.argv) > 1 else ""
     if len(sys.argv) > 2:
         api_key = sys.argv[2]
 
-    # Extract URL from issue body if not provided directly
-    if not video_url and issue_body:
-        urls = re.findall(r'https?://[^\s\)\"'"'"']+', issue_body)
-        if urls:
-            video_url = urls[0]
-
     if not video_url:
-        print("Usage: python process.py <video_url> [gemini_api_key]")
-        print("  Or set VIDEO_URL and GEMINI_API_KEY env vars")
+        print("Usage: resumen-video <video_file_or_url>")
+        print("  Or:  python process.py <video_file_or_url> [gemini_api_key]")
         sys.exit(1)
 
     if not api_key:
-        print("ERROR: GEMINI_API_KEY not set")
+        print("ERROR: GEMINI_API_KEY not set.")
+        print("Run ./install.sh or add it to .env")
         sys.exit(1)
 
     result_id, meta, summary = process_video(video_url, api_key)
-
-    is_local = os.path.isfile(video_url) if not isinstance(meta, dict) else "url" in meta
-
-    # Write GitHub Actions comment file (URL mode only)
-    issue_number = os.environ.get("ISSUE_NUMBER", "")
-    if issue_number and isinstance(meta, dict) and "url" in meta:
-        comment = (
-            "## 📹 Resumen generado\n\n"
-            "| | |\n|---|---|\n"
-            f"| **Video** | [{meta['title']}]({meta['url']}) |\n"
-            f"| **Duración** | {meta['duration_minutes']} min |\n"
-            f"| **Coste** | $0.00 |\n\n"
-            f"---\n\n{summary}\n"
-        )
-        Path("comment.md").write_text(comment, encoding="utf-8")
 
     print(f"\n{'='*60}")
     print(f"✅ DONE — {result_id}")

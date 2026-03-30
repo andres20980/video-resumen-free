@@ -1,70 +1,98 @@
-# 📹 Video Resumen Free
+# resumen-video
 
-Resúmenes exhaustivos de video con IA — **100% gratuito**.
+Convierte cualquier vídeo en un resumen `.md` detallado con IA. **Gratis. Un solo comando.**
 
-## ¿Qué es?
+```
+resumen-video reunion.mp4
+```
 
-Una pipeline que toma cualquier URL de video (YouTube, Vimeo, Google Drive...) y genera un resumen completo y detallado usando inteligencia artificial. Sin coste alguno.
+Resultado: `reunion.md` aparece donde estaba el vídeo. El `.mp4` se borra automáticamente.
+
+---
+
+## Instalación (2 minutos)
+
+### Requisitos previos
+
+Necesitas **Python 3** y **ffmpeg** instalados. Si no los tienes:
+
+```bash
+# Ubuntu/Debian/WSL
+sudo apt install python3 python3-venv ffmpeg
+
+# macOS
+brew install python3 ffmpeg
+```
+
+### Instalar
+
+```bash
+git clone https://github.com/andres20980/video-resumen-free.git
+cd video-resumen-free
+./install.sh
+```
+
+El instalador te pedirá una **API key de Gemini** (gratis, sin tarjeta):
+
+1. Abre https://aistudio.google.com/apikey
+2. Click en **"Create API Key"**
+3. Copia la key y pégala cuando te la pida
+
+Eso es todo. Abre una terminal nueva y ya puedes usar `resumen-video`.
+
+---
+
+## Uso
+
+```bash
+# Resumir un vídeo local (reemplaza .mp4 por .md)
+resumen-video grabacion.mp4
+
+# Funciona con cualquier formato
+resumen-video reunion.mkv
+resumen-video WhatsApp\ Video\ 2026-03-30.mp4
+
+# También con URLs de YouTube, Vimeo, etc.
+resumen-video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+### ¿Qué hace exactamente?
+
+1. Extrae el audio y los frames del vídeo
+2. Transcribe el audio con Gemini (gratis)
+3. Analiza los frames con Gemini Vision (gratis)
+4. Genera un resumen detallado en español cruzando ambas fuentes
+5. Guarda el `.md` donde estaba el vídeo y borra el original
+
+### Ejemplo de salida
+
+Un vídeo de 30 min de una reunión produce un `.md` con:
+- Resumen ejecutivo
+- Participantes identificados por nombre
+- Índice temporal con timestamps
+- Contenido detallado por secciones
+- Puntos clave y conclusiones
+- Decisiones y próximos pasos
+
+---
 
 ## Stack
 
 | Componente | Herramienta | Coste |
 |---|---|---|
-| Descarga | yt-dlp (open source) | $0.00 |
-| Extracción | ffmpeg (open source) | $0.00 |
-| Transcripción | Gemini 2.5 Flash (free tier) | $0.00 |
-| Análisis visual | Gemini 2.5 Flash (free tier) | $0.00 |
-| Resumen | Gemini 2.5 Flash (free tier) | $0.00 |
-| Procesamiento | GitHub Actions (2000 min/mes gratis) | $0.00 |
-| Frontend | GitHub Pages | $0.00 |
+| Descarga URLs | yt-dlp | $0.00 |
+| Extracción audio/frames | ffmpeg | $0.00 |
+| Transcripción | Gemini 2.5 Flash | $0.00 |
+| Análisis visual | Gemini 2.5 Flash | $0.00 |
+| Resumen | Gemini 2.5 Flash | $0.00 |
 | **TOTAL** | | **$0.00** |
 
-## ¿Cómo usarlo?
+## Límites del free tier de Gemini
 
-### Opción 1: Crear un Issue (recomendado)
-1. Ve a [Issues → New Issue](../../issues/new?template=summarize.yml)
-2. Selecciona "📹 Resumir Video"
-3. Pega la URL del video
-4. GitHub Actions procesará automáticamente y publicará el resumen como comentario
+- ~500 peticiones/día, 1M tokens/día
+- En la práctica: **~8 vídeos largos (30 min) al día**
+- Sin tarjeta de crédito, sin caducidad
 
-### Opción 2: Ejecutar manualmente
-1. Ve a [Actions](../../actions) → "📹 Resumir Video"
-2. Click "Run workflow"
-3. Introduce la URL del video
+## Licencia
 
-### Opción 3: Uso local
-```bash
-pip install -r scripts/requirements.txt
-export GEMINI_API_KEY=tu-api-key
-python scripts/process.py "https://www.youtube.com/watch?v=..."
-```
-
-## Resultados
-
-Los resúmenes se publican automáticamente en **GitHub Pages**: [ver sitio](../../deployments)
-
-## Límites del free tier
-
-- **Gemini**: ~500 requests/día, 1M tokens/día → ~8 videos/día
-- **GitHub Actions**: 2000 minutos/mes → ~200 videos/mes (estimando ~10 min/video)
-- **GitHub Pages**: 1GB de almacenamiento
-
-## Setup
-
-1. Fork este repositorio
-2. Añade el secret `GEMINI_API_KEY` en Settings → Secrets → Actions
-   - Consigue una API key gratis en [Google AI Studio](https://aistudio.google.com/apikey)
-3. Habilita GitHub Pages en Settings → Pages → Source: `Deploy from a branch` → Branch: `main`, folder: `/docs`
-4. ¡Listo! Crea un Issue o ejecuta el workflow manualmente
-
-## Calidad
-
-Pipeline comparada con soluciones de pago:
-
-| Modelo | Coste/video | Calidad |
-|---|---|---|
-| GPT-4o-mini (OpenAI) | ~$0.20 | ⭐⭐⭐ |
-| GPT-4o (OpenAI) | ~$0.23 | ⭐⭐⭐⭐ |
-| **Gemini 2.5 Flash (este proyecto)** | **$0.00** | **⭐⭐⭐⭐⭐** |
-
-Gemini 2.5 Flash iguala o supera a GPT-4o en transcripción, análisis visual y generación de resúmenes, especialmente en español.
+MIT
