@@ -97,29 +97,49 @@ def extract_audio(video_path, output_dir):
     return audio_path
 
 
-def extract_frames(video_path, output_dir, max_frames=20):
-    """Extract evenly-spaced keyframes as JPEG."""
+def extract_frames(video_path, output_dir, max_frames=60):
+    """Extract scene-change keyframes as JPEG, with uniform fallback."""
     frames_dir = os.path.join(output_dir, "frames")
     os.makedirs(frames_dir, exist_ok=True)
 
     duration = get_duration(video_path)
-    # Short videos: at least 1 frame/sec, cap at max_frames
-    # Long videos: 1 frame every 30s minimum
-    if duration <= 60:
-        n_frames = min(max_frames, max(1, int(duration)))
-        interval = duration / n_frames
-    else:
-        interval = max(30, duration / max_frames)
 
-    cmd = [
+    # --- Strategy 1: scene-change detection (best for demos/presentations) ---
+    # Detect frames where >30% of pixels change; sample at 2 fps to catch fast
+    # transitions without processing every single frame.
+    scene_cmd = [
         "ffmpeg", "-i", video_path,
-        "-vf", f"fps=1/{interval}",
+        "-vf", "fps=2,select='gt(scene\\,0.3)',scale='min(768\\,iw):-2'",
+        "-vsync", "vfr",
         "-frames:v", str(max_frames),
-        "-q:v", "3",
+        "-q:v", "5",
         os.path.join(frames_dir, "frame_%03d.jpg"), "-y",
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
-    return sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))
+    subprocess.run(scene_cmd, check=True, capture_output=True)
+    frames = sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))
+
+    # --- Strategy 2: uniform fallback if scene detection yields too few ---
+    # Minimum useful frames: 10 for short videos, 20 for long ones.
+    min_useful = 10 if duration <= 120 else 20
+    if len(frames) < min_useful:
+        for f in frames:
+            os.remove(f)
+        if duration <= 60:
+            n_frames = min(max_frames, max(1, int(duration)))
+            interval = duration / n_frames
+        else:
+            interval = max(10, duration / max_frames)
+        uniform_cmd = [
+            "ffmpeg", "-i", video_path,
+            "-vf", f"fps=1/{interval},scale='min(768\\,iw):-2'",
+            "-frames:v", str(max_frames),
+            "-q:v", "5",
+            os.path.join(frames_dir, "frame_%03d.jpg"), "-y",
+        ]
+        subprocess.run(uniform_cmd, check=True, capture_output=True)
+        frames = sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))
+
+    return frames
 
 
 # ─── Gemini AI ────────────────────────────────────────────────────────────────
@@ -188,7 +208,7 @@ def transcribe_audio(audio_path, api_key):
             types.Part.from_uri(file_uri=audio_file.uri, mime_type=audio_file.mime_type),
         ],
         config=types.GenerateContentConfig(
-            max_output_tokens=8192,
+            max_output_tokens=16384,
             temperature=0.1,
         ),
     )
@@ -223,8 +243,10 @@ def analyze_frames(frame_paths, api_key):
 
     for fp in frame_paths:
         img = Image.open(fp)
+        # Ensure 768px max for Gemini vision (matches extraction scale)
+        img.thumbnail((768, 768), Image.LANCZOS)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG")
+        img.save(buf, format="JPEG", quality=80)
         parts.append(types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg"))
 
     log(f"Analyzing {len(frame_paths)} frames with Gemini vision...")
@@ -233,32 +255,11 @@ def analyze_frames(frame_paths, api_key):
         model=GEMINI_MODEL,
         contents=parts,
         config=types.GenerateContentConfig(
-            max_output_tokens=4096,
+            max_output_tokens=8192,
             temperature=0.2,
         ),
     )
     return response.text
-
-
-import re
-
-def sanitize_transcript(text):
-    """Mask sensitive patterns that trigger Gemini PROHIBITED_CONTENT filter."""
-    # Passwords and secrets in key=value or key: value form
-    text = re.sub(
-        r'(?i)(password|passwd|pwd|secret|token|api[_-]?key|credentials?)\s*[:=]\s*\S+',
-        r'\1=***REDACTED***', text)
-    # Connection strings (jdbc, postgres, mysql, mongo, redis, amqp…)
-    text = re.sub(
-        r'(?i)(jdbc|postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqps?|https?)://\S+',
-        '[CONNECTION_STRING_REDACTED]', text)
-    # AWS-style keys (AKIA…)
-    text = re.sub(r'AKIA[0-9A-Z]{16}', '***AWS_KEY***', text)
-    # Generic long hex/base64 secrets (32+ chars)
-    text = re.sub(r'(?<![a-zA-Z0-9])[A-Za-z0-9+/]{40,}={0,2}(?![a-zA-Z0-9])', '***LONG_SECRET***', text)
-    # IPv4 addresses (internal IPs that may trigger filters)
-    text = re.sub(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', '[IP_REDACTED]', text)
-    return text
 
 
 def generate_summary(transcript, visual_analysis, duration_min, api_key):
@@ -336,85 +337,17 @@ TRANSCRIPCIÓN COMPLETA:
 ANÁLISIS VISUAL:
 {visual_analysis}"""
 
-    def _call_gemini(prompt_text, use_system_instruction=False):
-        config = types.GenerateContentConfig(
+    log("Generating summary with Gemini...")
+    response = gemini_call(
+        client,
+        model=GEMINI_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
             max_output_tokens=8192,
             temperature=0.3,
-            safety_settings=[
-                types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
-                types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
-                types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
-                types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
-                types.SafetySetting(category="HARM_CATEGORY_CIVIC_INTEGRITY", threshold="OFF"),
-            ],
-        )
-        if use_system_instruction:
-            config.system_instruction = (
-                "You are an internal IT documentation assistant. "
-                "The user is providing transcriptions of internal work meetings "
-                "and screen recordings about software infrastructure incidents. "
-                "These recordings contain technical jargon, server names, IP addresses, "
-                "and configuration details that are normal for IT operations. "
-                "Your job is to produce a structured summary in Spanish for internal documentation."
-            )
-        return gemini_call(
-            client,
-            model=GEMINI_MODEL,
-            contents=prompt_text,
-            config=config,
-        )
-
-    def _extract_text(response):
-        """Extract text from a Gemini response, trying multiple strategies."""
-        text = None
-        try:
-            text = response.text
-        except Exception as e:
-            log(f"⚠️  response.text raised: {e}")
-        if not text and response.candidates:
-            candidate = response.candidates[0]
-            if candidate.content and candidate.content.parts:
-                parts_text = "".join(
-                    p.text for p in candidate.content.parts
-                    if getattr(p, "text", None) and not getattr(p, "thought", False)
-                )
-                if parts_text:
-                    text = parts_text
-        return text
-
-    def _is_prohibited(response):
-        feedback = getattr(response, "prompt_feedback", None)
-        reason = getattr(feedback, "block_reason", None) if feedback else None
-        return reason and "PROHIBITED" in str(reason)
-
-    log("Generating summary with Gemini...")
-
-    # Attempt 1: raw prompt
-    response = _call_gemini(prompt)
-    text = _extract_text(response)
-
-    # Attempt 2: add system_instruction for context
-    if not text and _is_prohibited(response):
-        log("⚠️  Blocked as PROHIBITED_CONTENT — retrying with system instruction...")
-        response = _call_gemini(prompt, use_system_instruction=True)
-        text = _extract_text(response)
-
-    # Attempt 3: system_instruction + sanitized transcript
-    if not text and _is_prohibited(response):
-        log("⚠️  Still blocked — retrying with sanitized transcript...")
-        sanitized_t = sanitize_transcript(transcript)
-        sanitized_v = sanitize_transcript(visual_analysis)
-        sanitized_prompt = prompt.replace(transcript, sanitized_t).replace(visual_analysis, sanitized_v)
-        response = _call_gemini(sanitized_prompt, use_system_instruction=True)
-        text = _extract_text(response)
-
-    if not text:
-        feedback = getattr(response, "prompt_feedback", None)
-        log(f"⚠️  Gemini returned no text. prompt_feedback={feedback}, candidates={response.candidates}")
-        raise RuntimeError(
-            "Gemini returned an empty summary. Check safety filters or prompt size."
-        )
-    return text
+        ),
+    )
+    return response.text
 
 
 # ─── Pipeline ─────────────────────────────────────────────────────────────────
