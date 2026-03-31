@@ -240,6 +240,27 @@ def analyze_frames(frame_paths, api_key):
     return response.text
 
 
+import re
+
+def sanitize_transcript(text):
+    """Mask sensitive patterns that trigger Gemini PROHIBITED_CONTENT filter."""
+    # Passwords and secrets in key=value or key: value form
+    text = re.sub(
+        r'(?i)(password|passwd|pwd|secret|token|api[_-]?key|credentials?)\s*[:=]\s*\S+',
+        r'\1=***REDACTED***', text)
+    # Connection strings (jdbc, postgres, mysql, mongo, redis, amqp…)
+    text = re.sub(
+        r'(?i)(jdbc|postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqps?|https?)://\S+',
+        '[CONNECTION_STRING_REDACTED]', text)
+    # AWS-style keys (AKIA…)
+    text = re.sub(r'AKIA[0-9A-Z]{16}', '***AWS_KEY***', text)
+    # Generic long hex/base64 secrets (32+ chars)
+    text = re.sub(r'(?<![a-zA-Z0-9])[A-Za-z0-9+/]{40,}={0,2}(?![a-zA-Z0-9])', '***LONG_SECRET***', text)
+    # IPv4 addresses (internal IPs that may trigger filters)
+    text = re.sub(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', '[IP_REDACTED]', text)
+    return text
+
+
 def generate_summary(transcript, visual_analysis, duration_min, api_key):
     """Generate comprehensive summary using Gemini (free)."""
     client = get_client(api_key)
@@ -315,17 +336,85 @@ TRANSCRIPCIÓN COMPLETA:
 ANÁLISIS VISUAL:
 {visual_analysis}"""
 
-    log("Generating summary with Gemini...")
-    response = gemini_call(
-        client,
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
+    def _call_gemini(prompt_text, use_system_instruction=False):
+        config = types.GenerateContentConfig(
             max_output_tokens=8192,
             temperature=0.3,
-        ),
-    )
-    return response.text
+            safety_settings=[
+                types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
+                types.SafetySetting(category="HARM_CATEGORY_CIVIC_INTEGRITY", threshold="OFF"),
+            ],
+        )
+        if use_system_instruction:
+            config.system_instruction = (
+                "You are an internal IT documentation assistant. "
+                "The user is providing transcriptions of internal work meetings "
+                "and screen recordings about software infrastructure incidents. "
+                "These recordings contain technical jargon, server names, IP addresses, "
+                "and configuration details that are normal for IT operations. "
+                "Your job is to produce a structured summary in Spanish for internal documentation."
+            )
+        return gemini_call(
+            client,
+            model=GEMINI_MODEL,
+            contents=prompt_text,
+            config=config,
+        )
+
+    def _extract_text(response):
+        """Extract text from a Gemini response, trying multiple strategies."""
+        text = None
+        try:
+            text = response.text
+        except Exception as e:
+            log(f"⚠️  response.text raised: {e}")
+        if not text and response.candidates:
+            candidate = response.candidates[0]
+            if candidate.content and candidate.content.parts:
+                parts_text = "".join(
+                    p.text for p in candidate.content.parts
+                    if getattr(p, "text", None) and not getattr(p, "thought", False)
+                )
+                if parts_text:
+                    text = parts_text
+        return text
+
+    def _is_prohibited(response):
+        feedback = getattr(response, "prompt_feedback", None)
+        reason = getattr(feedback, "block_reason", None) if feedback else None
+        return reason and "PROHIBITED" in str(reason)
+
+    log("Generating summary with Gemini...")
+
+    # Attempt 1: raw prompt
+    response = _call_gemini(prompt)
+    text = _extract_text(response)
+
+    # Attempt 2: add system_instruction for context
+    if not text and _is_prohibited(response):
+        log("⚠️  Blocked as PROHIBITED_CONTENT — retrying with system instruction...")
+        response = _call_gemini(prompt, use_system_instruction=True)
+        text = _extract_text(response)
+
+    # Attempt 3: system_instruction + sanitized transcript
+    if not text and _is_prohibited(response):
+        log("⚠️  Still blocked — retrying with sanitized transcript...")
+        sanitized_t = sanitize_transcript(transcript)
+        sanitized_v = sanitize_transcript(visual_analysis)
+        sanitized_prompt = prompt.replace(transcript, sanitized_t).replace(visual_analysis, sanitized_v)
+        response = _call_gemini(sanitized_prompt, use_system_instruction=True)
+        text = _extract_text(response)
+
+    if not text:
+        feedback = getattr(response, "prompt_feedback", None)
+        log(f"⚠️  Gemini returned no text. prompt_feedback={feedback}, candidates={response.candidates}")
+        raise RuntimeError(
+            "Gemini returned an empty summary. Check safety filters or prompt size."
+        )
+    return text
 
 
 # ─── Pipeline ─────────────────────────────────────────────────────────────────
