@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """resumen-video — 100% free video summarization.
 
-Pipeline: yt-dlp (download) → ffmpeg (extract) → Gemini 2.5 Flash (transcribe + analyze + summarize)
-Cost: $0.00 — everything runs on Gemini free tier.
+Pipeline: yt-dlp (download) → ffmpeg (extract) → Whisper (transcribe) → Gemini (analyze + summarize)
+Cost: $0.00 — Whisper runs locally, Gemini free tier for text/vision only.
 """
 
 import os
@@ -12,6 +12,7 @@ import tempfile
 import glob
 import time
 import io
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -171,7 +172,48 @@ def gemini_call(client, **kwargs):
 
 
 def transcribe_audio(audio_path, api_key):
-    """Transcribe audio using Gemini (free)."""
+    """Transcribe audio using faster-whisper locally (free, no API limits)."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        log("⚠️  faster-whisper not installed, falling back to Gemini transcription")
+        return _transcribe_audio_gemini(audio_path, api_key)
+
+    # WAV 16kHz mono for optimal Whisper input
+    wav_path = audio_path.rsplit(".", 1)[0] + "_whisper.wav"
+    subprocess.run(
+        ["ffmpeg", "-i", audio_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path, "-y"],
+        capture_output=True, check=True,
+    )
+
+    whisper_model = os.environ.get("WHISPER_MODEL", "base")
+    log(f"🗣️ Loading Whisper ({whisper_model})...")
+    model = WhisperModel(whisper_model, device="cpu", compute_type="int8")
+
+    log("🗣️ Transcribing with Whisper...")
+    segments, info = model.transcribe(
+        wav_path,
+        language="es",
+        beam_size=5,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=500),
+    )
+
+    parts = []
+    for segment in segments:
+        parts.append(segment.text.strip())
+
+    os.unlink(wav_path)
+
+    transcript = " ".join(parts)
+    if not transcript.strip():
+        transcript = "[SIN HABLA: el audio no contiene voz detectada por Whisper]"
+
+    return transcript
+
+
+def _transcribe_audio_gemini(audio_path, api_key):
+    """Fallback: transcribe audio using Gemini API."""
     client = get_client(api_key)
 
     log("Uploading audio to Gemini File API...")
@@ -209,7 +251,7 @@ def transcribe_audio(audio_path, api_key):
             types.Part.from_uri(file_uri=audio_file.uri, mime_type=audio_file.mime_type),
         ],
         config=types.GenerateContentConfig(
-            max_output_tokens=8192,
+            max_output_tokens=16384,
             temperature=0.1,
         ),
     )
@@ -260,8 +302,6 @@ def analyze_frames(frame_paths, api_key):
     )
     return response.text
 
-
-import re
 
 def sanitize_transcript(text):
     """Mask sensitive patterns that trigger Gemini PROHIBITED_CONTENT filter."""
@@ -473,8 +513,8 @@ def process_video(video_url, api_key):
         # Delete temp copy immediately
         os.remove(video_path)
 
-        # 3. Transcribe with Gemini
-        log("📝 Transcribing audio with Gemini...")
+        # 3. Transcribe with Whisper (local, free)
+        log("📝 Transcribing audio...")
         transcript = transcribe_audio(audio_path, api_key)
         log(f"📝 Transcript: {len(transcript)} chars")
 
