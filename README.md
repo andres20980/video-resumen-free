@@ -69,7 +69,7 @@ resumen-video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ### ¿Qué hace exactamente?
 
 1. Extrae el audio y los frames del vídeo
-2. Transcribe el audio con Gemini (gratis)
+2. Transcribe el audio con **Whisper** (local, sin límites)
 3. Analiza los frames con Gemini Vision (gratis)
 4. Genera un resumen detallado en español cruzando ambas fuentes
 5. Guarda el `.md` donde estaba el vídeo y borra el original
@@ -92,16 +92,27 @@ Un vídeo de 30 min de una reunión produce un `.md` con:
 |---|---|---|
 | Descarga URLs | yt-dlp | $0.00 |
 | Extracción audio/frames | ffmpeg | $0.00 |
-| Transcripción | Gemini 2.5 Flash | $0.00 |
-| Análisis visual | Gemini 2.5 Flash | $0.00 |
-| Resumen | Gemini 2.5 Flash | $0.00 |
+| Transcripción | faster-whisper (local) | $0.00 |
+| Análisis visual | Gemini free tier | $0.00 |
+| Resumen | Gemini free tier | $0.00 |
 | **TOTAL** | | **$0.00** |
 
 ## Límites del free tier de Gemini
 
 - ~500 peticiones/día, 1M tokens/día
-- En la práctica: **~8 vídeos largos (30 min) al día**
+- La transcripción corre en local (Whisper), sin consumir cuota de Gemini
+- En la práctica: **~15-20 vídeos largos (30 min) al día**
 - Sin tarjeta de crédito, sin caducidad
+
+## Configuración avanzada
+
+Variables de entorno opcionales en `.env`:
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `GEMINI_MODEL` | `gemini-2.5-flash-lite` | Modelo Gemini para visión y resumen |
+| `GEMINI_FALLBACK_MODELS` | `gemini-2.5-flash,gemini-2.5-pro` | Modelos fallback si el primario da 503 |
+| `WHISPER_MODEL` | `base` | Modelo Whisper: `tiny`, `base`, `small`, `medium`, `large-v3` |
 
 ## Licencia
 
